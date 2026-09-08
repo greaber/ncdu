@@ -20,6 +20,7 @@ const delete = @import("delete.zig");
 const util = @import("util.zig");
 const exclude = @import("exclude.zig");
 const reflink = @import("reflink.zig");
+const du = @import("du.zig");
 const c = @import("c");
 const shim = @import("shim.zig");
 
@@ -41,6 +42,7 @@ test "imports" {
     _ = util;
     _ = exclude;
     _ = reflink;
+    _ = du;
 }
 
 // "Custom" allocator that wraps the libc allocator and calls ui.oom() on error.
@@ -396,6 +398,7 @@ fn help() noreturn {
     \\  -f FILE                    Import scanned directory from FILE
     \\  -o FILE                    Export scanned directory to FILE in JSON format
     \\  -O FILE                    Export scanned directory to FILE in binary format
+    \\  --du                        Print directory sizes in bytes and exit
     \\  -e, --extended             Enable extended information
     \\  --ignore-config            Don't load config files
     \\
@@ -527,6 +530,7 @@ pub fn main(init: std.process.Init.Minimal) void {
     var import_file: ?[:0]const u8 = null;
     var export_json: ?[:0]const u8 = null;
     var export_bin: ?[:0]const u8 = null;
+    var du_mode = false;
     var quit_after_scan = false;
     {
         var arena_instance: std.heap.ArenaAllocator = .init(allocator);
@@ -551,6 +555,7 @@ pub fn main(init: std.process.Init.Minimal) void {
             else if (opt.is("-O")) export_bin = dupeZ(allocator, args.arg() catch unreachable) catch unreachable
             else if (opt.is("-f") and import_file != null) ui.die("The -f flag can only be given once.\n", .{})
             else if (opt.is("-f")) import_file = dupeZ(allocator, args.arg() catch unreachable) catch unreachable
+            else if (opt.is("--du")) du_mode = true
             else if (opt.is("--ignore-config")) {}
             else if (opt.is("--quit-after-scan")) quit_after_scan = true // undocumented feature to help with benchmarking scan/import
             else if (argConfig(&args, opt, false)) |_| {}
@@ -566,13 +571,16 @@ pub fn main(init: std.process.Init.Minimal) void {
     const out_tty = stdout.isTty(io) catch false;
     const in_tty = stdin.isTty(io) catch false;
     if (config.scan_ui == null) {
-        if (export_json orelse export_bin) |f| {
+        if (du_mode) config.scan_ui = .none
+        else if (export_json orelse export_bin) |f| {
             if (!out_tty or std.mem.eql(u8, f, "-")) config.scan_ui = .none
             else config.scan_ui = .line;
         } else config.scan_ui = .full;
     }
-    if (!in_tty and import_file == null and export_json == null and export_bin == null and !quit_after_scan)
+    if (!in_tty and import_file == null and export_json == null and export_bin == null and !du_mode and !quit_after_scan)
         ui.die("Standard input is not a TTY. Did you mean to import a file using '-f -'?\n", .{});
+    if (du_mode and (export_json != null or export_bin != null))
+        ui.die("The --du option cannot be combined with export.\n", .{});
     if (config.reflink and @import("builtin").target.os.tag != .linux)
         ui.die("The --reflink option is only supported on Linux.\n", .{});
     if (config.reflink and (import_file != null or export_json != null or export_bin != null))
@@ -580,7 +588,7 @@ pub fn main(init: std.process.Init.Minimal) void {
     config.nc_tty = !in_tty or (if (export_json orelse export_bin) |f| std.mem.eql(u8, f, "-") else false);
 
     event_delay_timer = ui.clock.now(io);
-    defer ui.deinit();
+    defer if (!du_mode) ui.deinit();
 
     if (export_json) |f| {
         const file =
@@ -601,7 +609,7 @@ pub fn main(init: std.process.Init.Minimal) void {
     if (import_file) |f| {
         readImport(f) catch |e| ui.die("Error reading file '{s}': {s}.\n", .{f, ui.errorString(e)});
         config.imported = true;
-        if (config.binreader and (export_json != null or export_bin != null))
+        if (config.binreader and (du_mode or export_json != null or export_bin != null))
             bin_reader.import();
     } else {
         var buf: [std.Io.Dir.max_path_bytes+1]u8 = @splat(0);
@@ -609,6 +617,10 @@ pub fn main(init: std.process.Init.Minimal) void {
             if (shim.realpathZ(scan_dir orelse ".", buf[0..buf.len-1])) |p| buf[0..p.len:0]
             else |_| (scan_dir orelse ".");
         scan.scan(path) catch |e| ui.die("Error opening directory: {s}.\n", .{ui.errorString(e)});
+    }
+    if (du_mode) {
+        du.print(model.root);
+        return;
     }
     if (quit_after_scan or export_json != null or export_bin != null) return;
 

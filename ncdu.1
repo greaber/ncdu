@@ -12,6 +12,7 @@
 .Op Fl f Ar file
 .Op Fl o Ar file
 .Op Fl O Ar file
+.Op Fl \-du
 .Op Fl e , \-extended , \-no\-extended
 .Op Fl \-ignore\-config
 .Op Fl x , \-one\-file\-system , \-cross\-file\-system
@@ -121,6 +122,12 @@ The binary format has built-in compression, supports low-memory multi-threaded
 export (in combination with
 .Fl t )
 and can be browsed without importing the entire directory tree into memory.
+.It Fl \-du
+Print the size in bytes and path of every directory, then exit.
+The output is ordered from the deepest directories to the scan root.
+This mode can be combined with
+.Fl \-reflink
+for reflink-aware totals.
 .It Fl e , \-extended , \-no\-extended
 Enable/disable extended information mode.
 This will, in addition to the usual file information, also read the ownership,
