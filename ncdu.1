@@ -12,9 +12,11 @@
 .Op Fl f Ar file
 .Op Fl o Ar file
 .Op Fl O Ar file
+.Op Fl \-du
 .Op Fl e , \-extended , \-no\-extended
 .Op Fl \-ignore\-config
 .Op Fl x , \-one\-file\-system , \-cross\-file\-system
+.Op Fl \-reflink , \-no\-reflink
 .Op Fl \-exclude Ar pattern
 .Op Fl X , \-exclude\-from Ar file
 .Op Fl \-include\-caches , \-exclude\-caches
@@ -120,6 +122,12 @@ The binary format has built-in compression, supports low-memory multi-threaded
 export (in combination with
 .Fl t )
 and can be browsed without importing the entire directory tree into memory.
+.It Fl \-du
+Print the size in bytes and path of every directory, then exit.
+The output is ordered from the deepest directories to the scan root.
+This mode can be combined with
+.Fl \-reflink
+for reflink-aware totals.
 .It Fl e , \-extended , \-no\-extended
 Enable/disable extended information mode.
 This will, in addition to the usual file information, also read the ownership,
@@ -150,6 +158,21 @@ the same filesystem as the directory being scanned.
 Do cross filesystem boundaries.
 This is the default, but can be specified to overrule a previously configured
 .Fl x .
+.It Fl \-reflink , \-no\-reflink
+On Linux, use FIEMAP to count each physical file extent once in each directory
+subtree, avoiding double-counting caused by reflinks.
+Individual file and sibling directory totals can overlap, so their sum may be
+larger than the parent directory total.
+The totals describe extents referenced below each directory, not space that
+would necessarily be freed, since extents may also be referenced outside the
+scanned tree.
+Reflink exports are staged in memory so that exact directory totals can be
+written to either export format. This makes exporting use memory proportional
+to the number of scanned files and directories.
+Files for which FIEMAP fails are marked as scan errors and counted without
+reflink deduplication.
+Refreshing rescans the original scan root; after deleting a file, refresh to
+update physical usage totals.
 .It Fl \-exclude Ar pattern
 Exclude files that match
 .Ar pattern .

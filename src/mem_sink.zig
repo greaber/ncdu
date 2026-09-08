@@ -10,7 +10,17 @@ const sink = @import("sink.zig");
 pub const global = struct {
     pub var root: ?*model.Dir = null;
     pub var stats: bool = true; // calculate aggregate directory stats
+    var cumulative = std.AutoHashMap(*model.Dir, model.Blocks).init(main.allocator);
 };
+
+pub fn begin() void {
+    global.cumulative.clearRetainingCapacity();
+}
+
+fn setCumulative(dir: *model.Dir, stat: *const sink.Stat) void {
+    if (stat.cum_blocks) |blocks|
+        global.cumulative.put(dir, blocks) catch unreachable;
+}
 
 pub const Thread = struct {
     // Arena allocator for model.Entry structs, these are never freed.
@@ -23,6 +33,7 @@ pub fn statToEntry(stat: *const sink.Stat, e: *model.Entry, parent: *model.Dir) 
     if (e.dir()) |d| {
         d.parent = parent;
         d.pack.dev = model.devices.getId(stat.dev);
+        setCumulative(d, stat);
     }
     if (e.link()) |l| {
         l.parent = parent;
@@ -189,6 +200,7 @@ pub fn createRoot(path: []const u8, stat: *const sink.Stat) Dir {
     p.entry.pack.blocks = stat.blocks;
     p.entry.size = stat.size;
     p.pack.dev = model.devices.getId(stat.dev);
+    setCumulative(p, stat);
     if (p.entry.ext()) |e| e.* = stat.ext;
     return Dir.init(p);
 }
@@ -209,4 +221,9 @@ pub fn done() void {
         }
     }
     model.inodes.addAllStats();
+    var cumulative = global.cumulative.iterator();
+    while (cumulative.next()) |entry| {
+        entry.key_ptr.*.entry.pack.blocks = entry.value_ptr.*;
+        entry.key_ptr.*.shared_blocks = 0;
+    }
 }

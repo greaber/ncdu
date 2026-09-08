@@ -106,7 +106,7 @@ fn deleteCmd(path: [:0]const u8, ptr: *align(1) ?*model.Entry) bool {
         var it : ?*model.Dir = parent;
         while (it) |p| : (it = p.parent) {
             if (stat.etype != .link) {
-                p.entry.pack.blocks +|= e.pack.blocks;
+                if (!main.config.reflink) p.entry.pack.blocks +|= e.pack.blocks;
                 p.entry.size +|= e.size;
             }
             p.items +|= 1;

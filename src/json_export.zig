@@ -193,6 +193,10 @@ pub const Writer = struct {
             ctx.write(",\"dsize\":");
             ctx.writeUint(util.blocksToSize(stat.blocks));
         }
+        if (stat.cum_blocks) |blocks| {
+            ctx.write(",\"cumdsize\":");
+            ctx.writeUint(util.blocksToSize(blocks));
+        }
         if (stat.etype == .dir and stat.dev != parent_dev) {
             ctx.write(",\"dev\":");
             ctx.writeUint(stat.dev);

@@ -179,7 +179,7 @@ pub const Entry = extern struct {
 
         var it = parent;
         while (it) |p| : (it = p.parent) {
-            p.entry.pack.blocks -|= self.pack.blocks;
+            if (!main.config.reflink) p.entry.pack.blocks -|= self.pack.blocks;
             p.entry.size -|= self.size;
             p.items -|= 1 + (if (self.dir()) |d| d.items else 0);
         }

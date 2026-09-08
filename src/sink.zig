@@ -8,6 +8,7 @@ const mem_src = @import("mem_src.zig");
 const mem_sink = @import("mem_sink.zig");
 const json_export = @import("json_export.zig");
 const bin_export = @import("bin_export.zig");
+const reflink = @import("reflink.zig");
 const ui = @import("ui.zig");
 
 // Terminology note:
@@ -60,6 +61,8 @@ pub const Stat = struct {
     dev: u64 = 0,
     ino: u64 = 0,
     nlink: u31 = 0,
+    // Optional directory total when individual entry block counts are non-additive.
+    cum_blocks: ?model.Blocks = null,
     ext: model.Ext = .{},
 };
 
@@ -136,6 +139,13 @@ pub const Dir = struct {
         defer global.last_error_lock.unlock(main.io);
         if (global.last_error) |p| main.allocator.free(p);
         global.last_error = d.path();
+    }
+
+    pub fn modelDir(d: *Dir) ?*model.Dir {
+        return switch (d.out) {
+            .mem => |*m| m.dir,
+            else => null,
+        };
     }
 
     fn path(d: *Dir) [:0]u8 {
@@ -217,25 +227,34 @@ pub const Thread = struct {
 
 
 pub const global = struct {
-    pub var state: enum { done, err, zeroing, hlcnt, running } = .running;
+    pub var state: enum { done, err, zeroing, hlcnt, reflink, running } = .running;
     pub var threads: []Thread = undefined;
     pub var sink: enum { json, mem, bin } = .mem;
+    pub var export_after_scan: ?enum { json, bin } = null;
 
     pub var last_error: ?[:0]u8 = null;
     var last_error_lock: std.Io.Mutex = .init;
     var need_confirm_quit = false;
 };
 
+pub fn stageExport() void {
+    global.export_after_scan = switch (global.sink) {
+        .json => .json,
+        .bin => .bin,
+        .mem => unreachable,
+    };
+    global.sink = .mem;
+    mem_sink.global.stats = false;
+}
+
 
 // Must be the first thing to call from a source; initializes global state.
 pub fn createThreads(num: usize) []Thread {
     // JSON export does not support multiple threads, scan into memory first.
-    if (global.sink == .json and num > 1) {
-        global.sink = .mem;
-        mem_sink.global.stats = false;
-    }
+    if (global.sink == .json and num > 1) stageExport();
 
     global.state = .running;
+    if (global.sink == .mem) mem_sink.begin();
     if (global.last_error) |p| main.allocator.free(p);
     global.last_error = null;
     global.threads = main.allocator.alloc(Thread, num) catch unreachable;
@@ -257,12 +276,17 @@ pub fn done() void {
         .json => json_export.done(),
         .bin => bin_export.done(global.threads),
     }
+    if (reflink.isCollecting()) {
+        global.state = .reflink;
+        reflink.finish();
+    }
     global.state = .done;
     main.allocator.free(global.threads);
 
-    // We scanned into memory, now we need to scan from memory to JSON
-    if (global.sink == .mem and !mem_sink.global.stats) {
-        global.sink = .json;
+    // Emit an export that needed whole-scan information or serialized traversal.
+    if (global.export_after_scan) |dest| {
+        global.export_after_scan = null;
+        global.sink = switch (dest) { .json => .json, .bin => .bin };
         mem_src.run(model.root);
     }
 
@@ -313,6 +337,9 @@ fn drawConsole() void {
         wr.writeByte('\n') catch {};
         st.lines_written += 1;
 
+    } else if (global.state == .reflink) {
+        wr.print("Counting physical extents... {} / {}\n", .{ reflink.progress_done, reflink.progress_total }) catch {};
+        st.lines_written += 1;
     } else if (global.state == .running) {
         var bytes: u64 = 0;
         var files: u64 = 0;
@@ -464,6 +491,14 @@ pub fn draw() void {
                         ui.addnum(.default, model.inodes.add_total);
                     }
                 },
+                .reflink => {
+                    const box = ui.Box.create(4, ui.cols -| 5, "Finalizing");
+                    box.move(2, 2);
+                    ui.addstr("Counting physical extents... ");
+                    ui.addnum(.default, reflink.progress_done);
+                    ui.addstr(" / ");
+                    ui.addnum(.default, reflink.progress_total);
+                },
                 .running => drawProgress(),
             }
         },
@@ -477,6 +512,7 @@ pub fn keyInput(ch: i32) void {
         .err => main.state = .browse,
         .zeroing => {},
         .hlcnt => {},
+        .reflink => {},
         .running => {
             switch (ch) {
                 'q' => {
