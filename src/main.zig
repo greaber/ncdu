@@ -19,6 +19,7 @@ const browser = @import("browser.zig");
 const delete = @import("delete.zig");
 const util = @import("util.zig");
 const exclude = @import("exclude.zig");
+const reflink = @import("reflink.zig");
 const c = @import("c");
 const shim = @import("shim.zig");
 
@@ -39,6 +40,7 @@ test "imports" {
     _ = delete;
     _ = util;
     _ = exclude;
+    _ = reflink;
 }
 
 // "Custom" allocator that wraps the libc allocator and calls ui.oom() on error.
@@ -90,6 +92,7 @@ pub const config = struct {
     pub var complevel: u8 = 4;
     pub var compress: bool = false;
     pub var export_block_size: ?usize = null;
+    pub var reflink: bool = false;
 
     pub var update_delay: u64 = 100*std.time.ns_per_ms;
     pub var scan_ui: ?enum { none, line, full } = null;
@@ -216,6 +219,8 @@ fn argConfig(args: *Args, opt: Args.Option, infile: bool) !void {
     else if (opt.is("--fast-ui-updates")) config.update_delay = 100*std.time.ns_per_ms
     else if (opt.is("-x") or opt.is("--one-file-system")) config.same_fs = true
     else if (opt.is("--cross-file-system")) config.same_fs = false
+    else if (opt.is("--reflink")) config.reflink = true
+    else if (opt.is("--no-reflink")) config.reflink = false
     else if (opt.is("-e") or opt.is("--extended")) config.extended = true
     else if (opt.is("--no-extended")) config.extended = false
     else if (opt.is("-r") and !(config.can_delete orelse true)) config.can_shell = false
@@ -396,6 +401,7 @@ fn help() noreturn {
     \\
     \\Scan options:
     \\  -x, --one-file-system      Stay on the same filesystem
+    \\  --reflink                  Count reflinked extents once per directory
     \\  --exclude PATTERN          Exclude files that match PATTERN
     \\  -X, --exclude-from FILE    Exclude files that match any pattern in FILE
     \\  --exclude-caches           Exclude directories containing CACHEDIR.TAG
@@ -567,6 +573,10 @@ pub fn main(init: std.process.Init.Minimal) void {
     }
     if (!in_tty and import_file == null and export_json == null and export_bin == null and !quit_after_scan)
         ui.die("Standard input is not a TTY. Did you mean to import a file using '-f -'?\n", .{});
+    if (config.reflink and @import("builtin").target.os.tag != .linux)
+        ui.die("The --reflink option is only supported on Linux.\n", .{});
+    if (config.reflink and (import_file != null or export_json != null or export_bin != null))
+        ui.die("The --reflink option cannot be combined with import or export.\n", .{});
     config.nc_tty = !in_tty or (if (export_json orelse export_bin) |f| std.mem.eql(u8, f, "-") else false);
 
     event_delay_timer = ui.clock.now(io);
@@ -614,6 +624,7 @@ pub fn main(init: std.process.Init.Minimal) void {
     while (true) {
         switch (state) {
             .refresh => {
+                if (config.reflink) mem_sink.global.root = model.root;
                 var full_path: std.ArrayList(u8) = .empty;
                 defer full_path.deinit(allocator);
                 mem_sink.global.root.?.fmtPath(allocator, true, &full_path);

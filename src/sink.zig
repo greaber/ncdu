@@ -8,6 +8,7 @@ const mem_src = @import("mem_src.zig");
 const mem_sink = @import("mem_sink.zig");
 const json_export = @import("json_export.zig");
 const bin_export = @import("bin_export.zig");
+const reflink = @import("reflink.zig");
 const ui = @import("ui.zig");
 
 // Terminology note:
@@ -138,6 +139,13 @@ pub const Dir = struct {
         global.last_error = d.path();
     }
 
+    pub fn modelDir(d: *Dir) ?*model.Dir {
+        return switch (d.out) {
+            .mem => |*m| m.dir,
+            else => null,
+        };
+    }
+
     fn path(d: *Dir) [:0]u8 {
         var components: std.ArrayList([]const u8) = .empty;
         defer components.deinit(main.allocator);
@@ -217,7 +225,7 @@ pub const Thread = struct {
 
 
 pub const global = struct {
-    pub var state: enum { done, err, zeroing, hlcnt, running } = .running;
+    pub var state: enum { done, err, zeroing, hlcnt, reflink, running } = .running;
     pub var threads: []Thread = undefined;
     pub var sink: enum { json, mem, bin } = .mem;
 
@@ -256,6 +264,10 @@ pub fn done() void {
         .mem => mem_sink.done(),
         .json => json_export.done(),
         .bin => bin_export.done(global.threads),
+    }
+    if (main.config.reflink) {
+        global.state = .reflink;
+        reflink.finish();
     }
     global.state = .done;
     main.allocator.free(global.threads);
@@ -313,6 +325,9 @@ fn drawConsole() void {
         wr.writeByte('\n') catch {};
         st.lines_written += 1;
 
+    } else if (global.state == .reflink) {
+        wr.print("Counting physical extents... {} / {}\n", .{ reflink.progress_done, reflink.progress_total }) catch {};
+        st.lines_written += 1;
     } else if (global.state == .running) {
         var bytes: u64 = 0;
         var files: u64 = 0;
@@ -464,6 +479,14 @@ pub fn draw() void {
                         ui.addnum(.default, model.inodes.add_total);
                     }
                 },
+                .reflink => {
+                    const box = ui.Box.create(4, ui.cols -| 5, "Finalizing");
+                    box.move(2, 2);
+                    ui.addstr("Counting physical extents... ");
+                    ui.addnum(.default, reflink.progress_done);
+                    ui.addstr(" / ");
+                    ui.addnum(.default, reflink.progress_total);
+                },
                 .running => drawProgress(),
             }
         },
@@ -477,6 +500,7 @@ pub fn keyInput(ch: i32) void {
         .err => main.state = .browse,
         .zeroing => {},
         .hlcnt => {},
+        .reflink => {},
         .running => {
             switch (ch) {
                 'q' => {

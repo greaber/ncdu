@@ -15,6 +15,7 @@
 .Op Fl e , \-extended , \-no\-extended
 .Op Fl \-ignore\-config
 .Op Fl x , \-one\-file\-system , \-cross\-file\-system
+.Op Fl \-reflink , \-no\-reflink
 .Op Fl \-exclude Ar pattern
 .Op Fl X , \-exclude\-from Ar file
 .Op Fl \-include\-caches , \-exclude\-caches
@@ -150,6 +151,19 @@ the same filesystem as the directory being scanned.
 Do cross filesystem boundaries.
 This is the default, but can be specified to overrule a previously configured
 .Fl x .
+.It Fl \-reflink , \-no\-reflink
+On Linux, use FIEMAP to count each physical file extent once in each directory
+subtree, avoiding double-counting caused by reflinks.
+Individual file and sibling directory totals can overlap, so their sum may be
+larger than the parent directory total.
+The totals describe extents referenced below each directory, not space that
+would necessarily be freed, since extents may also be referenced outside the
+scanned tree.
+This mode cannot be combined with import or export.
+Files for which FIEMAP fails are marked as scan errors and counted without
+reflink deduplication.
+Refreshing rescans the original scan root; after deleting a file, refresh to
+update physical usage totals.
 .It Fl \-exclude Ar pattern
 Exclude files that match
 .Ar pattern .

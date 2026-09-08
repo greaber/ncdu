@@ -8,6 +8,7 @@ const model = @import("model.zig");
 const sink = @import("sink.zig");
 const ui = @import("ui.zig");
 const exclude = @import("exclude.zig");
+const reflink = @import("reflink.zig");
 const c = @import("c");
 
 
@@ -298,6 +299,13 @@ const Thread = struct {
         }
 
         if (stat.etype != .dir) {
+            if (main.config.reflink) {
+                const parent = dir.sink.modelDir().?;
+                if (stat.etype == .reg or stat.etype == .link)
+                    reflink.addFile(dir.fd, name, parent, stat.dev, stat.ino, stat.blocks)
+                else
+                    reflink.addDir(parent, stat.blocks);
+            }
             dir.sink.addStat(t.sink, name, &stat);
             return;
         }
@@ -331,6 +339,7 @@ const Thread = struct {
         }
 
         const s = dir.sink.addDir(t.sink, name, &stat);
+        if (main.config.reflink) reflink.addDir(s.modelDir().?, stat.blocks);
         const ndir = Dir.create(edir, stat.dev, dir.pat.enter(name), s);
         if (main.config.threads == 1 or !t.state.tryPush(ndir))
             t.stack.append(main.allocator, ndir) catch unreachable;
@@ -363,6 +372,7 @@ const Thread = struct {
 
 
 pub fn scan(path: [:0]const u8) !void {
+    if (main.config.reflink) reflink.begin();
     const sink_threads = sink.createThreads(main.config.threads);
     defer sink.done();
 
@@ -376,6 +386,7 @@ pub fn scan(path: [:0]const u8) !void {
     defer main.allocator.free(state.threads);
 
     const root = sink.createRoot(path, &stat);
+    if (main.config.reflink) reflink.addDir(root.modelDir().?, stat.blocks);
     const dir = Dir.create(fd, stat.dev, exclude.getPatterns(path), root);
     _ = state.tryPush(dir);
 

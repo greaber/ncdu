@@ -12,6 +12,10 @@
 #include <unistd.h>       // getuid()
 #include <wchar.h>        // wcwidth()
 #if defined(__linux__)
+#include <fcntl.h>    // openat()
+#include <linux/fiemap.h>
+#include <linux/fs.h> // FS_IOC_FIEMAP
+#include <sys/ioctl.h>
 #include <sys/vfs.h> // statfs()
 #endif
 #include <curses.h>
