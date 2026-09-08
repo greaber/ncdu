@@ -413,12 +413,12 @@ pub const Dir = struct {
         t.itemKey(.cumasize);
         t.cborHead(.pos, d.size +| d.stat.size);
         t.itemKey(.cumdsize);
-        t.cborHead(.pos, util.blocksToSize(d.blocks +| d.stat.blocks));
+        t.cborHead(.pos, util.blocksToSize(d.stat.cum_blocks orelse d.blocks +| d.stat.blocks));
         if (d.shared_size > 0) {
             t.itemKey(.shrasize);
             t.cborHead(.pos, d.shared_size);
         }
-        if (d.shared_blocks > 0) {
+        if (d.stat.cum_blocks == null and d.shared_blocks > 0) {
             t.itemKey(.shrdsize);
             t.cborHead(.pos, util.blocksToSize(d.shared_blocks));
         }

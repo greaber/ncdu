@@ -304,7 +304,7 @@ const Thread = struct {
                 if (stat.etype == .reg or stat.etype == .link)
                     reflink.addFile(dir.fd, name, parent, stat.dev, stat.ino, stat.blocks)
                 else
-                    reflink.addDir(parent, stat.blocks);
+                    reflink.addUnmapped(parent, stat.blocks);
             }
             dir.sink.addStat(t.sink, name, &stat);
             return;

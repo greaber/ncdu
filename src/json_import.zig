@@ -393,6 +393,12 @@ fn itemkey(ctx: *Ctx, key: []const u8) void {
                 return;
             }
         },
+        'c' => {
+            if (eq(u8, key, "cumdsize")) {
+                ctx.stat.cum_blocks = @intCast(ctx.p.uint(u64) >> 9);
+                return;
+            }
+        },
         'e' => {
             if (eq(u8, key, "excluded")) {
                 var buf: [32]u8 = undefined;

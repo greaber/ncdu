@@ -385,6 +385,7 @@ const Import = struct {
             .prev => ctx.fields.prev = kv.val.itemref(ref),
             .asize => ctx.stat.size = kv.val.int(u64),
             .dsize => ctx.stat.blocks = @intCast(kv.val.int(u64)/512),
+            .cumdsize => ctx.stat.cum_blocks = @intCast(kv.val.int(u64)/512),
             .dev => ctx.stat.dev = kv.val.int(u64),
             .rderr => ctx.fields.rderr = kv.val.isTrue(),
             .sub => ctx.fields.sub = kv.val.itemref(ref),

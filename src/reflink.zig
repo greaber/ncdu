@@ -18,6 +18,7 @@ const Extent = struct {
 
 const DirStats = struct {
     base_blocks: u64 = 0,
+    own_blocks: u64 = 0,
     blocks: u64 = 0,
     active: u32 = 0,
     last: u64 = 0,
@@ -30,6 +31,7 @@ var dirs = std.AutoHashMap(*model.Dir, DirStats).init(main.allocator);
 pub var progress_total: usize = 0;
 pub var progress_done: usize = 0;
 pub var errors: usize = 0;
+var collecting = false;
 
 pub fn begin() void {
     extents.clearAndFree(main.allocator);
@@ -37,6 +39,7 @@ pub fn begin() void {
     progress_total = 0;
     progress_done = 0;
     errors = 0;
+    collecting = true;
 }
 
 pub fn addDir(dir: *model.Dir, blocks: u64) void {
@@ -45,6 +48,24 @@ pub fn addDir(dir: *model.Dir, blocks: u64) void {
     const stat = dirs.getOrPut(dir) catch unreachable;
     if (!stat.found_existing) stat.value_ptr.* = .{};
     stat.value_ptr.base_blocks +|= blocks;
+    stat.value_ptr.own_blocks +|= blocks;
+}
+
+pub fn addUnmapped(dir: *model.Dir, blocks: u64) void {
+    lock.lockUncancelable(main.io);
+    defer lock.unlock(main.io);
+    const stat = dirs.getOrPut(dir) catch unreachable;
+    if (!stat.found_existing) stat.value_ptr.* = .{};
+    stat.value_ptr.base_blocks +|= blocks;
+}
+
+pub fn ownBlocks(dir: *model.Dir) ?model.Blocks {
+    const stat = dirs.get(dir) orelse return null;
+    return @intCast(@min(stat.own_blocks, std.math.maxInt(model.Blocks)));
+}
+
+pub fn isCollecting() bool {
+    return collecting;
 }
 
 fn appendOpaque(parent: *model.Dir, dev: u64, ino: u64, blocks: u64) void {
@@ -222,6 +243,7 @@ pub fn finish() void {
         entry.key_ptr.*.entry.pack.blocks = @intCast(@min(entry.value_ptr.blocks, std.math.maxInt(model.Blocks)));
         entry.key_ptr.*.shared_blocks = 0;
     }
+    collecting = false;
 }
 
 test "directory extent unions" {
@@ -246,4 +268,5 @@ test "directory extent unions" {
     try std.testing.expectEqual(@as(model.Blocks, 4), left.entry.pack.blocks);
     try std.testing.expectEqual(@as(model.Blocks, 5), right.entry.pack.blocks);
     begin();
+    collecting = false;
 }

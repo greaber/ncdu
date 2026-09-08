@@ -61,6 +61,8 @@ pub const Stat = struct {
     dev: u64 = 0,
     ino: u64 = 0,
     nlink: u31 = 0,
+    // Optional directory total when individual entry block counts are non-additive.
+    cum_blocks: ?model.Blocks = null,
     ext: model.Ext = .{},
 };
 
@@ -228,22 +230,31 @@ pub const global = struct {
     pub var state: enum { done, err, zeroing, hlcnt, reflink, running } = .running;
     pub var threads: []Thread = undefined;
     pub var sink: enum { json, mem, bin } = .mem;
+    pub var export_after_scan: ?enum { json, bin } = null;
 
     pub var last_error: ?[:0]u8 = null;
     var last_error_lock: std.Io.Mutex = .init;
     var need_confirm_quit = false;
 };
 
+pub fn stageExport() void {
+    global.export_after_scan = switch (global.sink) {
+        .json => .json,
+        .bin => .bin,
+        .mem => unreachable,
+    };
+    global.sink = .mem;
+    mem_sink.global.stats = false;
+}
+
 
 // Must be the first thing to call from a source; initializes global state.
 pub fn createThreads(num: usize) []Thread {
     // JSON export does not support multiple threads, scan into memory first.
-    if (global.sink == .json and num > 1) {
-        global.sink = .mem;
-        mem_sink.global.stats = false;
-    }
+    if (global.sink == .json and num > 1) stageExport();
 
     global.state = .running;
+    if (global.sink == .mem) mem_sink.begin();
     if (global.last_error) |p| main.allocator.free(p);
     global.last_error = null;
     global.threads = main.allocator.alloc(Thread, num) catch unreachable;
@@ -265,16 +276,17 @@ pub fn done() void {
         .json => json_export.done(),
         .bin => bin_export.done(global.threads),
     }
-    if (main.config.reflink) {
+    if (reflink.isCollecting()) {
         global.state = .reflink;
         reflink.finish();
     }
     global.state = .done;
     main.allocator.free(global.threads);
 
-    // We scanned into memory, now we need to scan from memory to JSON
-    if (global.sink == .mem and !mem_sink.global.stats) {
-        global.sink = .json;
+    // Emit an export that needed whole-scan information or serialized traversal.
+    if (global.export_after_scan) |dest| {
+        global.export_after_scan = null;
+        global.sink = switch (dest) { .json => .json, .bin => .bin };
         mem_src.run(model.root);
     }
 

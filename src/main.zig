@@ -583,8 +583,6 @@ pub fn main(init: std.process.Init.Minimal) void {
         ui.die("The --du option cannot be combined with export.\n", .{});
     if (config.reflink and @import("builtin").target.os.tag != .linux)
         ui.die("The --reflink option is only supported on Linux.\n", .{});
-    if (config.reflink and (import_file != null or export_json != null or export_bin != null))
-        ui.die("The --reflink option cannot be combined with import or export.\n", .{});
     config.nc_tty = !in_tty or (if (export_json orelse export_bin) |f| std.mem.eql(u8, f, "-") else false);
 
     event_delay_timer = ui.clock.now(io);
@@ -605,6 +603,8 @@ pub fn main(init: std.process.Init.Minimal) void {
         bin_export.setupOutput(file);
         sink.global.sink = .bin;
     }
+    if (config.reflink and import_file == null and (export_json != null or export_bin != null))
+        sink.stageExport();
 
     if (import_file) |f| {
         readImport(f) catch |e| ui.die("Error reading file '{s}': {s}.\n", .{f, ui.errorString(e)});

@@ -166,7 +166,9 @@ larger than the parent directory total.
 The totals describe extents referenced below each directory, not space that
 would necessarily be freed, since extents may also be referenced outside the
 scanned tree.
-This mode cannot be combined with import or export.
+Reflink exports are staged in memory so that exact directory totals can be
+written to either export format. This makes exporting use memory proportional
+to the number of scanned files and directories.
 Files for which FIEMAP fails are marked as scan errors and counted without
 reflink deduplication.
 Refreshing rescans the original scan root; after deleting a file, refresh to

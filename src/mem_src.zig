@@ -5,15 +5,18 @@ const std = @import("std");
 const main = @import("main.zig");
 const model = @import("model.zig");
 const sink = @import("sink.zig");
+const reflink = @import("reflink.zig");
 
 // Emit the memory tree to the sink in depth-first order from a single thread,
 // suitable for JSON export.
 
 fn toStat(e: *model.Entry) sink.Stat {
     const el = e.link();
+    const reflink_own = if (e.dir()) |d| reflink.ownBlocks(d) else null;
     return sink.Stat{
         .etype = e.pack.etype,
-        .blocks = e.pack.blocks,
+        .blocks = reflink_own orelse e.pack.blocks,
+        .cum_blocks = if (reflink_own != null) e.pack.blocks else null,
         .size = e.size,
         .dev =
             if (e.dir()) |d| model.devices.list.items[d.pack.dev]
